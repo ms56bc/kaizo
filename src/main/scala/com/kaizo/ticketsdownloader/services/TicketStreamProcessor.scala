@@ -6,19 +6,15 @@ import java.util.UUID
 
 import com.kaizo.ticketsdownloader.external.{Ticket, TicketsDownloader}
 import com.kaizo.ticketsdownloader.repository.ClientInfoRepository
-import com.kaizo.ticketsdownloader.services.DownloadManager.DownloadManagerError
-import com.kaizo.ticketsdownloader.services.TicketsHandler.ProcessingStatus
+import com.kaizo.ticketsdownloader.repository.ClientInfoRepository.ClientInfoRow
 import zio.clock.Clock
-import zio.{Has, RIO, Schedule, Task, UIO, ZIO, ZLayer}
+import zio.{Task, UIO, URIO, ZIO}
 import zio.stream.ZStream
 
-import scala.concurrent.duration._
 
-trait TicketStreamProcessor[T] {
-  def startDownloading(streamId: UUID): RIO[Clock, Unit]
-  protected def getLastEvent(streamId: UUID, uuid: Option[UUID]): Task[Option[Instant]]
+trait TicketStreamProcessor {
+  def startDownloading(streamId: UUID): URIO[Clock, Unit]
   protected def updateProcessedUntil(streamId: UUID, processedUntil: Instant): Task[Unit]
-  protected def handle(tickets: List[T]): UIO[ProcessingStatus]
 }
 
 object TicketStreamProcessor {
@@ -33,7 +29,7 @@ object TicketStreamProcessor {
 
 }
 
-abstract class InMemoryTicketStream[T<: Ticket](clientInfoRepository: ClientInfoRepository.Service,
+class InMemoryTicketStream[T<: Ticket](clientInfoRepository: ClientInfoRepository.Service,
                                                    ticketsDownloader: TicketsDownloader[T],
                                                    ticketsHandler: TicketsHandler[T]) extends TicketStreamProcessor {
 
@@ -45,28 +41,40 @@ abstract class InMemoryTicketStream[T<: Ticket](clientInfoRepository: ClientInfo
         continue => !continue
       )
 
-  override def startDownloading(streamId: UUID): ZIO[Clock, DownloadManagerError, Unit] = {
-   ZStream
-      .fromEffect(getLastEvent(streamId, None))
-      .mapM{
-        case Some(startFrom) => ticketsDownloader.download(startFrom)
-        case None => ZIO.fail(DownloadManager.ClientStreamMissing(streamId))
-      }
-      .mapM(tickets => ticketsHandler.handle(tickets))
-      .mapM(status => updateProcessedUntil(streamId, status.processedUntil))
-      .runDrain
-      .delay(Duration.ofSeconds(10))
-      .repeatUntilM(_ => repeatUntil(streamId))
-      .unit
-      .mapError(error => DownloadManager.GenericError(error.getMessage))
-  }
+  override def startDownloading(streamId: UUID): URIO[Clock, Unit] =
+    ZStream
+     .fromEffect(getClientInfo(streamId))
+     .mapM(info => ticketsDownloader.download(info._1, info._2, info._3))
+     .mapM(ticketsHandler.handle)
+     .mapM(status => updateProcessedUntil(streamId, status.processedUntil))
+     .onError(
+       _ => finalizeStream(streamId)
+     )
+     .runDrain
+     .delay(Duration.ofSeconds(10))
+     .repeatUntilM(_ => repeatUntil(streamId))
+      .fold(
+        error => println(error),
+        _ => ()
+      )
 
-  override protected def getLastEvent(streamId: UUID, uuid: Option[UUID]): Task[Option[Instant]] = {
-    clientInfoRepository.getInfo(streamId).map(_.flatMap(_.startFrom))
+  private def getClientInfo(streamId: UUID): Task[(Instant, String, String)] = {
+    clientInfoRepository
+      .getInfo(streamId)
+      .flatMap{
+        case Some(ClientInfoRow(_, _, authInfo, domain, Some(startFrom), _, _, _)) =>
+          ZIO.succeed((startFrom, domain, authInfo))
+        case _ => ZIO.fail(DownloadManager.ClientStreamMissing(streamId))
+      }
   }
 
   override protected def updateProcessedUntil(streamId: UUID, processedUntil: Instant): UIO[Unit] = {
     clientInfoRepository.saveOffset(streamId, processedUntil)
+  }
+
+  private def finalizeStream(streamId: UUID) = {
+      clientInfoRepository
+        .setStatus(streamId, true, false)
   }
 }
 // offset fetch and save (time or cursor based)

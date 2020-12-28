@@ -20,15 +20,25 @@ class TicketsStreamRouteApp(downloadManager: DownloadManager)
   var ids = mutable.ListBuffer.empty[String]
   val routes = HttpRoutes.of[RIO[Clock, *]] {
     case GET -> Root / "status" => Ok("Hello world.")
-    case POST -> Root / "streams" => downloadManager.registerStream(StreamRegistration("clientName", "", "", TicketingSystem.ZenDesk)).foldM(
-      _ =>  InternalServerError(),
-      value => Ok(value)
-    )
-    case PUT -> Root / "streams" / UUIDVar(streamID) =>  downloadManager.startStream(streamID, Some(Instant.now)).foldM(
-      _ =>  InternalServerError(),
-      value => Ok(value)
-    )
-    case PUT -> Root / "streams" / UUIDVar(streamID)/"stop" => downloadManager.stopStream(streamID).foldM(
+
+    case req @ POST -> Root / "streams" =>
+      for {
+        registrationRequest <- req.as[StreamRegistration]
+       resp <- downloadManager.registerStream(registrationRequest).foldM(
+         _ =>  InternalServerError(),
+         value => Ok(value))
+      } yield resp
+
+
+    case req @ PUT -> Root / "streams" / UUIDVar(streamID) / "start" =>
+      for {
+        startRequest <- req.as[StreamStartReq]
+        resp <-  downloadManager.startStream(streamID, Some(startRequest.startFrom)).foldM(
+          _ =>  InternalServerError(),
+          value => Ok(value))
+      } yield resp
+
+    case PUT -> Root / "streams" / UUIDVar(streamID)/ "stop" => downloadManager.stopStream(streamID).foldM(
       _ =>  InternalServerError(),
       value => Ok(value)
     )

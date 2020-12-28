@@ -2,7 +2,6 @@ package com.kaizo.ticketsdownloader.services
 
 import java.time.Instant
 import java.util.UUID
-
 import com.kaizo.ticketsdownloader.api.{StreamInfo, StreamRegistration, StreamStatus, TicketingSystem}
 import com.kaizo.ticketsdownloader.repository.ClientInfoRepository
 import com.kaizo.ticketsdownloader.repository.ClientInfoRepository.ClientInfoRow
@@ -57,9 +56,6 @@ object DownloadManager {
     override def stopStream(streamId: UUID): IO[DownloadManagerError, Unit] =
      clientInfoRepository
        .setStatus(streamId, continueProcessing = false, isRunning = false)
-       .mapError(error => GenericError(error.getMessage))
-
-    //TODO fix this
 
     override def registerStream(streamRegistration: StreamRegistration): IO[DownloadManagerError, StreamInfo] = {
       clientInfoRepository.registerClient(
@@ -67,7 +63,7 @@ object DownloadManager {
         clientName = streamRegistration.clientName,
         domain = streamRegistration.domain,
         authInfo = streamRegistration.authInfo,
-        startFrom = Some(Instant.now),
+        startFrom = None,
         system = streamRegistration.system,
         continueProcessing = false,
         isRunning = false

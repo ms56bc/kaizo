@@ -24,7 +24,7 @@ object ClientInfoRepository {
   trait Service {
     def getInfo(streamId: UUID): IO[RepositoryError, Option[ClientInfoRow]]
 
-    def setStatus(streamId: UUID, continueProcessing: Boolean, isRunning: Boolean): IO[RepositoryError, Unit]
+    def setStatus(streamId: UUID, continueProcessing: Boolean, isRunning: Boolean): UIO[Unit]
     def setStartFrom(streamId: UUID, startFrom:Option[Instant]): IO[RepositoryError, Unit]
 
     def registerClient(streamId: UUID,

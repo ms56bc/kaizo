@@ -15,6 +15,8 @@ case class StreamRegistration(
                                system: TicketingSystem
                              )
 
+case class StreamStartReq(startFrom: Instant)
+
 case class StreamInfo(
                        streamId: UUID,
                        clientName: String,
@@ -48,4 +50,7 @@ trait HttpApiJson {
   implicit val StreamInfoEncoder: Encoder[StreamInfo] = deriveEncoder
   implicit val StreamStatusDecoder: Decoder[StreamStatus] = deriveDecoder
   implicit val StreamStatusDEncoder: Encoder[StreamStatus] = deriveEncoder
+
+  implicit val StreamStartReqDecoder: Decoder[StreamStartReq] = deriveDecoder
+  implicit val StreamStartReqEncoder: Encoder[StreamStartReq] = deriveEncoder
 }

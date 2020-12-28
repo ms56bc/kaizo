@@ -17,7 +17,7 @@ class InMemoryClientInfoRepository(state: RefM[Map[UUID, ClientInfoRow]]) extend
       clientsInfo <- state.get
     } yield clientsInfo.get(streamId)
 
-  override def setStatus(streamId: UUID, continueProcessing: Boolean,  isRunning: Boolean): IO[RepositoryError, Unit] =
+  override def setStatus(streamId: UUID, continueProcessing: Boolean,  isRunning: Boolean): UIO[Unit] =
     for {
       res <- state.update(state => state.get(streamId) match {
         case Some(stream) => ZIO.succeed(state + (streamId -> stream.copy(continueProcessing = continueProcessing, isRunning = isRunning)))
