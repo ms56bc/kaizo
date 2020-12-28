@@ -1,5 +1,6 @@
 # kaizo
 Kaizo
+*run with sbt run, will start on default 8080 port.*
 
 The api:
 
