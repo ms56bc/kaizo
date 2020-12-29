@@ -7,7 +7,7 @@ import org.http4s.Uri.{Authority, RegName, Scheme}
 import org.http4s._
 import org.http4s.client.Client
 import org.http4s.headers.{Authorization, `Content-Type`}
-import zio.{Task, ZManaged}
+import zio.Task
 import zio.interop.catz._
 import org.http4s.circe.CirceEntityCodec._
 import cats.syntax.option._
@@ -21,11 +21,11 @@ trait TicketsDownloader[T <: Ticket] {
 object TicketsDownloader {
   sealed abstract class  DownloadError(message: String) extends Exception(message)
 
-  def zenDesk(client: ZManaged[Any, Throwable, Client[Task]]): TicketsDownloader[ZenDeskResponse] =
+  def zenDesk(client: Client[Task]): TicketsDownloader[ZenDeskResponse] =
     new ZenDeskTicketDownloader(client)
 }
 
-class ZenDeskTicketDownloader(client: ZManaged[Any, Throwable, Client[Task]]) extends TicketsDownloader[ZenDeskResponse] with ZenDeskTicketJson {
+class ZenDeskTicketDownloader(client: Client[Task]) extends TicketsDownloader[ZenDeskResponse] with ZenDeskTicketJson {
 
   private def baseUri(domain: String): Uri = Uri(
     scheme = Scheme.https.some,
@@ -40,7 +40,7 @@ class ZenDeskTicketDownloader(client: ZManaged[Any, Throwable, Client[Task]]) ex
       }
 
 
-  override def download(startFrom: Instant, domain: String, accessToken: String): Task[ZenDeskResponse] = {client.use(client => {
+  override def download(startFrom: Instant, domain: String, accessToken: String): Task[ZenDeskResponse] = {
     val authTokenUri: Uri = baseUri(domain).addPath(s"/api/v2/incremental/tickets.json")
       .setQueryParams(Map("start_time" -> Seq(startFrom.getEpochSecond), "per_page" -> Seq(10L)))
 
@@ -53,7 +53,6 @@ class ZenDeskTicketDownloader(client: ZManaged[Any, Throwable, Client[Task]]) ex
       if (resp.status.isSuccess) resp.as[ZenDeskResponse]
       else parseErrorResponse(resp)
     }
-    })
   }
 }
 

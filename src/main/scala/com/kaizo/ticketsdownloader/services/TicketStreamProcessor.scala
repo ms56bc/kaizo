@@ -8,12 +8,12 @@ import com.kaizo.ticketsdownloader.external.{Ticket, TicketsDownloader}
 import com.kaizo.ticketsdownloader.repository.ClientInfoRepository
 import com.kaizo.ticketsdownloader.repository.ClientInfoRepository.ClientInfoRow
 import zio.clock.Clock
-import zio.{Task, UIO, URIO, ZIO}
+import zio.{RIO, Schedule, Task, UIO, URIO, ZIO}
 import zio.stream.ZStream
 
 
 trait TicketStreamProcessor {
-  def startDownloading(streamId: UUID): URIO[Clock, Unit]
+  def startDownloading(streamId: UUID): RIO[Clock, Unit]
   protected def updateProcessedUntil(streamId: UUID, processedUntil: Instant): Task[Unit]
 }
 
@@ -33,15 +33,8 @@ class InMemoryTicketStream[T<: Ticket](clientInfoRepository: ClientInfoRepositor
                                                    ticketsDownloader: TicketsDownloader[T],
                                                    ticketsHandler: TicketsHandler[T]) extends TicketStreamProcessor {
 
-  private def repeatUntil(streamId: UUID): UIO[Boolean] =
-    clientInfoRepository.getInfo(streamId)
-      .map(_.exists(_.continueProcessing))
-      .fold(
-        _ => true,
-        continue => !continue
-      )
 
-  override def startDownloading(streamId: UUID): URIO[Clock, Unit] =
+  override def startDownloading(streamId: UUID): RIO[Clock, Unit] =
     ZStream
      .fromEffect(getClientInfo(streamId))
      .mapM(info => ticketsDownloader.download(info._1, info._2, info._3))
@@ -50,19 +43,16 @@ class InMemoryTicketStream[T<: Ticket](clientInfoRepository: ClientInfoRepositor
      .onError(
        _ => finalizeStream(streamId)
      )
-     .runDrain
-     .delay(Duration.ofSeconds(10))
-     .repeatUntilM(_ => repeatUntil(streamId))
-      .fold(
-        error => println(error),
-        _ => ()
-      )
+      .runDrain
+      .delay(Duration.ofSeconds(10))
+      .forever
+
 
   private def getClientInfo(streamId: UUID): Task[(Instant, String, String)] = {
     clientInfoRepository
       .getInfo(streamId)
       .flatMap{
-        case Some(ClientInfoRow(_, _, authInfo, domain, Some(startFrom), _, _, _)) =>
+        case Some(ClientInfoRow(_, _, authInfo, domain, Some(startFrom), _, _)) =>
           ZIO.succeed((startFrom, domain, authInfo))
         case _ => ZIO.fail(DownloadManager.ClientStreamMissing(streamId))
       }
@@ -74,7 +64,7 @@ class InMemoryTicketStream[T<: Ticket](clientInfoRepository: ClientInfoRepositor
 
   private def finalizeStream(streamId: UUID) = {
       clientInfoRepository
-        .setStatus(streamId, true, false)
+        .setStatus(streamId, false)
   }
 }
 // offset fetch and save (time or cursor based)

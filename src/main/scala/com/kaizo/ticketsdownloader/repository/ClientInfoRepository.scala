@@ -15,7 +15,6 @@ object ClientInfoRepository {
                            domain: String,
                            startFrom: Option[Instant],
                            system: TicketingSystem,
-                           continueProcessing: Boolean,
                            isRunning: Boolean)
 
   sealed abstract class RepositoryError(msg: String) extends Exception(msg)
@@ -24,7 +23,7 @@ object ClientInfoRepository {
   trait Service {
     def getInfo(streamId: UUID): IO[RepositoryError, Option[ClientInfoRow]]
 
-    def setStatus(streamId: UUID, continueProcessing: Boolean, isRunning: Boolean): UIO[Unit]
+    def setStatus(streamId: UUID, isRunning: Boolean): UIO[Unit]
     def setStartFrom(streamId: UUID, startFrom:Option[Instant]): IO[RepositoryError, Unit]
 
     def registerClient(streamId: UUID,
@@ -33,7 +32,6 @@ object ClientInfoRepository {
                        domain: String,
                        startFrom: Option[Instant],
                        system: TicketingSystem,
-                       continueProcessing: Boolean,
                        isRunning: Boolean): IO[RepositoryError, ClientInfoRow]
 
     def saveOffset(streamId: UUID, processedUntil: Instant): UIO[Unit]

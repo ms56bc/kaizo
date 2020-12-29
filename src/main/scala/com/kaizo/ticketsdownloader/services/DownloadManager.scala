@@ -1,13 +1,14 @@
 package com.kaizo.ticketsdownloader.services
 
+
 import java.time.Instant
 import java.util.UUID
 import com.kaizo.ticketsdownloader.api.{StreamInfo, StreamRegistration, StreamStatus, TicketingSystem}
 import com.kaizo.ticketsdownloader.repository.ClientInfoRepository
-import com.kaizo.ticketsdownloader.repository.ClientInfoRepository.ClientInfoRow
+import com.kaizo.ticketsdownloader.repository.ClientInfoRepository.{ClientInfoRow, RepositoryError}
 import com.kaizo.ticketsdownloader.services.DownloadManager.DownloadManagerError
 import zio.clock.Clock
-import zio.{IO, ZIO}
+import zio.{Fiber, IO, RefM, Task, ZIO}
 
 
 trait DownloadManager {
@@ -17,25 +18,47 @@ trait DownloadManager {
   def getAllStreams: IO[DownloadManagerError, List[StreamInfo]]
 }
 
+
 object DownloadManager {
   abstract class DownloadManagerError(msg: String) extends Exception(msg)
   case class ClientStreamMissing(streamId: UUID) extends DownloadManagerError(s"Stream Missing. $streamId")
   case class GenericError(msg: String) extends DownloadManagerError(msg)
 
   def live(clientInfoRepository: ClientInfoRepository.Service,
-           streamProcessors: Map[TicketingSystem, TicketStreamProcessor]) = new DownloadManagerImpl(clientInfoRepository, streamProcessors)
+           streamProcessors: Map[TicketingSystem, TicketStreamProcessor],
+           streamsState: RefM[Map[UUID, Fiber.Runtime[Throwable, Unit]]]) =
+    new DownloadManagerImpl(clientInfoRepository, streamProcessors, streamsState)
 
   class DownloadManagerImpl(clientInfoRepository: ClientInfoRepository.Service,
-                            streamProcessors: Map[TicketingSystem, TicketStreamProcessor]
+                            streamProcessors: Map[TicketingSystem, TicketStreamProcessor],
+                            streamsState: RefM[Map[UUID, Fiber.Runtime[Throwable, Unit]]]
                            ) extends DownloadManager {
+
+    private def addStream(streamId: UUID, fiber: Fiber.Runtime[Throwable, Unit]): IO[RepositoryError, Unit] =
+      for {
+      res <- streamsState.update(state => state.get(streamId) match {
+        case Some(_) => ZIO.succeed(state)
+        case None => ZIO.succeed(state + (streamId -> fiber))
+      })
+    } yield res
+
+    private def removeStream(streamId: UUID): Task[Unit] =
+      for {
+        res <- streamsState.update(state => state.get(streamId) match {
+          case Some(fiber) => fiber.interrupt *> ZIO.succeed(state - streamId)
+          case None => ZIO.succeed(state)
+        })
+      } yield res
 
     private def _startStream(streamId: UUID,
                              clientStreamInfo: ClientInfoRow, startTime: Option[Instant]): ZIO[Clock, DownloadManagerError, StreamStatus] = {
       val res = streamProcessors.get(clientStreamInfo.system) match {
         case Some(streamProcessor) => for {
-          _ <- clientInfoRepository.setStatus(streamId, continueProcessing = true, isRunning = true)
+          _ <- clientInfoRepository.setStatus(streamId,  isRunning = true)
           _ <- clientInfoRepository.setStartFrom(streamId, startTime)
-          _ <- streamProcessor.startDownloading(streamId).fork
+          fiber <- streamProcessor.startDownloading(streamId).fork
+          _<- addStream(streamId, fiber)
+          _ = streamsState
         } yield StreamStatus.StreamStarted
         case None => ZIO.succeed(StreamStatus.StreamTypeNotFound)
       }
@@ -54,18 +77,19 @@ object DownloadManager {
     }
 
     override def stopStream(streamId: UUID): IO[DownloadManagerError, Unit] =
-     clientInfoRepository
-       .setStatus(streamId, continueProcessing = false, isRunning = false)
+      for {
+          _ <- removeStream(streamId).mapError(error => DownloadManager.GenericError(error.getMessage))
+          _ <- clientInfoRepository.setStatus(streamId,  isRunning = false)
+        } yield ()
 
     override def registerStream(streamRegistration: StreamRegistration): IO[DownloadManagerError, StreamInfo] = {
       clientInfoRepository.registerClient(
-        streamId = UUID.randomUUID(),
+        streamId = UUID.fromString("b96e2b74-e45a-4519-b33b-4745665a1000"),
         clientName = streamRegistration.clientName,
         domain = streamRegistration.domain,
         authInfo = streamRegistration.authInfo,
         startFrom = None,
         system = streamRegistration.system,
-        continueProcessing = false,
         isRunning = false
       ).bimap(
           error => DownloadManager.GenericError(error.getMessage),

@@ -17,10 +17,10 @@ class InMemoryClientInfoRepository(state: RefM[Map[UUID, ClientInfoRow]]) extend
       clientsInfo <- state.get
     } yield clientsInfo.get(streamId)
 
-  override def setStatus(streamId: UUID, continueProcessing: Boolean,  isRunning: Boolean): UIO[Unit] =
+  override def setStatus(streamId: UUID, isRunning: Boolean): UIO[Unit] =
     for {
       res <- state.update(state => state.get(streamId) match {
-        case Some(stream) => ZIO.succeed(state + (streamId -> stream.copy(continueProcessing = continueProcessing, isRunning = isRunning)))
+        case Some(stream) => ZIO.succeed(state + (streamId -> stream.copy(isRunning = isRunning)))
         case None => ZIO.succeed(state)
       })
     } yield res
@@ -39,9 +39,8 @@ class InMemoryClientInfoRepository(state: RefM[Map[UUID, ClientInfoRow]]) extend
                               domain: String,
                               startFrom: Option[Instant],
                               system: TicketingSystem,
-                              continueProcessing: Boolean,
                               isRunning: Boolean): IO[RepositoryError, ClientInfoRow] = {
-    val row = ClientInfoRow(streamId, clientName, authInfo, domain, startFrom, system, continueProcessing, isRunning)
+    val row = ClientInfoRow(streamId, clientName, authInfo, domain, startFrom, system, isRunning)
     for {
       _ <- state.update(state => state.get(streamId) match {
         case Some(_) => ZIO.fail(AlreadyExists(clientName, streamId): RepositoryError)
